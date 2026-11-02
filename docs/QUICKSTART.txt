@@ -1,0 +1,21 @@
+DOTAPE — 작은 도트 녹음기
+
+DOTAPE.exe를 실행하고 마이크를 고른 뒤 가운데 녹음 버튼을 누르세요.
+
+빈 공간 드래그: 여러 클립 선택 + 재생선 이동
+클립 드래그: 선택한 클립 함께 이동
+휠 회전: 확대·축소 / 휠 버튼 드래그: 가로·세로 이동
+클립 중앙 선: 볼륨 / 위쪽 손잡이: 페이드 / 아래쪽 끝: 길이
+더블클릭: 이름 변경. 숫자·볼륨 선에서는 기본값 복귀.
+
+R 녹음 / Space 재생 / Ctrl+B 분할 / Ctrl+J 이어붙이기
+Ctrl+C·V 복사·붙여넣기 / Ctrl+Z 취소 / Ctrl+Shift+Z 다시 실행
+N 자석 / Alt+드래그 자석 해제 / Ctrl+E 내보내기
+
+녹음 원본과 마지막 작업: %LOCALAPPDATA%\Sori
+데이터 경로는 이전 버전과 호환됩니다. 앱은 녹음 파일을 인터넷에 보내지 않습니다.
+
+소스와 설명: https://github.com/moveout824/dotape
+다운로드: https://github.com/moveout824/dotape/releases/latest
+
+앱 MIT / 갈무리 SIL OFL 1.1 / 의존성 고지는 동봉 파일 참고

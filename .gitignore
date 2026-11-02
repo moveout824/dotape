@@ -1,0 +1,13 @@
+/target
+*.tmp
+/artifacts
+/recordings
+session*.json
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.exe
+*.zip
+.env
+.env.*

@@ -1,0 +1,34 @@
+[package]
+name = "dotape"
+version = "0.1.0"
+edition = "2024"
+description = "A minimal pixel-art recorder and multitrack audio editor"
+license = "MIT"
+repository = "https://github.com/moveout824/dotape"
+readme = "README.md"
+keywords = ["audio", "recorder", "pixel-art", "egui"]
+
+[dependencies]
+eframe = { version = "=0.33.3", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+cpal = "=0.16.0"
+hound = "3.5.1"
+rfd = "0.15.4"
+rtrb = "0.3.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+flacenc = { version = "0.5.1", default-features = false }
+mp3lame-encoder = "0.2.2"
+vorbis_rs = { version = "0.5.5", default-features = false }
+rubato = "0.16.2"
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[[bin]]
+name = "DOTAPE"
+path = "src/main.rs"

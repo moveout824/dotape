@@ -1,0 +1,26 @@
+DOTAPE statically links LAME 3.100 through mp3lame-sys 0.1.11.
+LAME is LGPL-licensed. Its exact source and build wrapper are included in
+vendor/mp3lame-sys, including lame-3.100/COPYING. The application source and
+Cargo.lock are also included, so a modified LAME can be built and relinked.
+
+Download the accompanying DOTAPE-source.zip from:
+https://github.com/moveout824/dotape/releases/latest
+The source repository is https://github.com/moveout824/dotape
+
+From this source folder, using Rust and the Visual Studio C++ Build Tools:
+
+  $env:RUSTFLAGS='-C target-feature=+crt-static'
+Append this local replacement section to Cargo.toml:
+
+  [patch.crates-io]
+  mp3lame-sys = { path = "vendor/mp3lame-sys" }
+
+Then run:
+
+  cargo build --release
+
+Do not add --locked to this replacement build: Cargo updates the lockfile
+to refer to the local replacement. You may modify the bundled LAME source
+before rebuilding. The resulting executable is target/release/DOTAPE.exe.
+The MIT license on the application source permits modification and rebuilding.
+See the third-party notices and the bundled LAME license for their terms.
