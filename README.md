@@ -60,6 +60,25 @@ WAV·MP3·FLAC·OGG Vorbis로 내보냅니다. 하나의 파일로 합치거나 
 
 긴 녹음은 길이에 비례해 메모리를 사용합니다. 다른 샘플레이트로 내보낼 때는 변환용 메모리가 추가로 필요합니다. WAV는 4 GB 한도가 있으므로 그보다 큰 출력에는 FLAC 등을 사용하세요.
 
+### 다른 프로그램에서 쓰기
+
+영상 편집기 같은 다른 프로그램(예: DOTRACK)이 DOTAPE를 녹음기로 불러 쓸 수 있습니다. DOTAPE는 호스트를 알지 못하며, 환경 변수 세 개와 파일 하나로만 이야기합니다. 아무것도 설정하지 않으면 평소와 같습니다.
+
+| 이름 | 역할 |
+|---|---|
+| `SORI_DATA_DIR` | 작업과 원본 WAV를 저장할 폴더. 녹음은 `recordings\take-*.wav`로 남습니다. |
+| `SORI_EXPORT_DIR` | 내보내기 대화상자가 처음 여는 폴더. 없으면 만듭니다. 한 번 저장한 뒤에는 마지막 저장 폴더를 우선합니다. |
+| `SORI_HOST` | 호스트 이름. 설정하면 하단에 ‘녹음이 끝나면 창을 닫으세요’ 안내와 내보내기 폴더를 표시하고, 설정 아이콘 오른쪽 클릭 메뉴에 ‘내보내기 폴더 열기’가 생깁니다. |
+| `handoff.json` | `SORI_DATA_DIR` 안에 녹음·내보내기·종료 시점마다 통째로 다시 씁니다. `last_export`, 없으면 `last_take`를 쓰면 됩니다. `closed`가 `true`면 정상 종료입니다. `SORI_DATA_DIR`가 없으면 만들지 않습니다. |
+| `--version` | 버전을 출력하고 바로 종료합니다. 호스트가 지원 여부를 확인할 때 씁니다. |
+
+```json
+{"version":1,"host":"DOTRACK","last_take":"...\\recordings\\take-1.wav","last_export":"...\\export\\녹음.wav",
+ "takes":["..."],"exports":["..."],"updated":1762150000,"closed":true}
+```
+
+목록에는 디스크에 남아 있는 항목만 적습니다. 트랙별로 내보낸 경우 `exports` 항목은 폴더입니다.
+
 ## 개발
 
 Rust stable과 Windows C++ Build Tools가 필요합니다.

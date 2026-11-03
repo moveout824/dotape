@@ -1,6 +1,7 @@
 use crate::{
     audio::{self, InputDevice, InputMode, Playback, RecordSettings, Recorder},
     export::{self, ExportResult, ExportSettings, Format},
+    host,
     model::{Clip, History, PEAK_BLOCK, Peak, Project, TrackDrop, time_label},
     session,
     theme::{self, *},
@@ -103,6 +104,11 @@ pub struct SoriApp {
     message_error: bool,
     message_at: Instant,
     last_export: Option<PathBuf>,
+    host: Option<String>,
+    host_export_dir: Option<PathBuf>,
+    host_note: Option<String>,
+    takes: Vec<PathBuf>,
+    exports: Vec<PathBuf>,
     demo: bool,
     close_dialog: bool,
     allow_close: bool,
@@ -169,6 +175,15 @@ impl SoriApp {
         } else {
             None
         };
+        let host = host::host();
+        let host_export_dir = host::export_dir();
+        let host_note = host.as_ref().map(|name| match &host_export_dir {
+            Some(dir) => format!(
+                "{name} — 녹음이 끝나면 창을 닫으세요 · 내보내기: {}",
+                dir.display()
+            ),
+            None => format!("{name} — 녹음이 끝나면 창을 닫으세요"),
+        });
         Self {
             project,
             history: History::default(),
@@ -205,6 +220,11 @@ impl SoriApp {
             message_error,
             message_at: Instant::now(),
             last_export: None,
+            host,
+            host_export_dir,
+            host_note,
+            takes: vec![],
+            exports: vec![],
             demo,
             close_dialog: false,
             allow_close: false,
@@ -298,6 +318,18 @@ impl SoriApp {
             {
                 self.tell(format!("작업 자동 저장 실패: {e}"), true);
             }
+        }
+    }
+    /// 호스트가 `SORI_DATA_DIR`를 정해 준 경우에만 `handoff.json`을 갱신한다. 혼자 쓸 때는 아무것도 하지 않는다.
+    fn handoff(&self, closed: bool) {
+        if let Some(dir) = host::handoff_dir() {
+            let _ = host::write_handoff(
+                &dir,
+                self.host.as_deref(),
+                &self.takes,
+                &self.exports,
+                closed,
+            );
         }
     }
     fn begin_edit(&mut self) {
@@ -405,11 +437,15 @@ impl SoriApp {
                     self.history.push(&self.project);
                     self.cursor = self.rec_start + source.duration();
                     let clip_id = self.rec_id.wrapping_add(1);
+                    if !source.path.is_empty() {
+                        self.takes.push(PathBuf::from(&source.path));
+                    }
                     self.project
                         .add_source(source, clip_id, self.rec_track, self.rec_start);
                     self.project.overwrite_clip(clip_id);
                     self.select_single(clip_id);
                     self.persist();
+                    self.handoff(false);
                     if dropped > 0 {
                         self.tell(format!("녹음 저장 · 처리 지연으로 {dropped}프레임이 누락됐습니다. 다른 앱을 닫거나 버퍼를 ‘기기 자동’으로 설정해 주세요."), true);
                     } else {
@@ -818,6 +854,8 @@ impl SoriApp {
                 Ok(Ok(Some(result))) => {
                     self.export_job.take();
                     self.last_export = Some(result.path.clone());
+                    self.exports.push(result.path.clone());
+                    self.handoff(false);
                     if result.clipped {
                         self.tell("파일 저장 완료 · 겹친 소리가 0 dB를 넘어서 잘렸습니다. 전체 볼륨을 낮추거나 ‘크기 맞추기’를 켜고 다시 저장하세요.", true);
                     } else {
@@ -867,13 +905,16 @@ impl SoriApp {
         let settings = self.export_settings.clone();
         let progress = Arc::new(AtomicU32::new(0));
         let worker_progress = progress.clone();
+        let start_dir =
+            host::dialog_dir(self.last_export.as_deref(), self.host_export_dir.as_deref());
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
+            let mut dialog = rfd::FileDialog::new();
+            if let Some(dir) = &start_dir {
+                dialog = dialog.set_directory(dir);
+            }
             let result = if settings.split_tracks {
-                match rfd::FileDialog::new()
-                    .set_title("트랙 파일을 저장할 폴더")
-                    .pick_folder()
-                {
+                match dialog.set_title("트랙 파일을 저장할 폴더").pick_folder() {
                     Some(folder) => {
                         export::export_tracks(&project, &settings, &folder, worker_progress)
                             .map(Some)
@@ -886,7 +927,7 @@ impl SoriApp {
                     export::safe_name(&project.name),
                     settings.format.extension()
                 );
-                match rfd::FileDialog::new()
+                match dialog
                     .set_title("오디오 저장")
                     .set_file_name(file_name)
                     .add_filter(settings.format.label(), &[settings.format.extension()])
@@ -1009,6 +1050,14 @@ impl SoriApp {
             response.context_menu(|ui| {
                 if ui.button("녹음 폴더 열기").clicked() {
                     reveal(&session::data_dir());
+                    ui.close();
+                }
+                if self.host.is_some() && ui.button("내보내기 폴더 열기").clicked() {
+                    reveal(
+                        self.host_export_dir
+                            .as_deref()
+                            .unwrap_or(&session::data_dir()),
+                    );
                     ui.close();
                 }
             });
@@ -2181,6 +2230,7 @@ impl SoriApp {
     }
 
     fn footer(&mut self, ctx: &Context) {
+        let host_note = self.host_note.clone();
         TopBottomPanel::bottom("transport").frame(egui::Frame::new().fill(SURFACE).inner_margin(Margin::symmetric(22,12))).show(ctx,|ui|{
             ui.horizontal(|ui|{
                 ui.add_enabled_ui(!self.busy(),|ui|{
@@ -2202,6 +2252,7 @@ impl SoriApp {
                         if response.clicked(){self.export_open=true;}
                         response.context_menu(|ui|{if let Some(path)=&self.last_export{if ui.button("저장 위치 열기").clicked(){reveal(path);ui.close();}}else{ui.add_enabled(false,Button::new("아직 저장한 파일 없음"));}});
                     });}
+                    if let Some(note)=&host_note{ui.add_space(14.0);ui.add(Label::new(RichText::new(note).size(12.0).color(MUTED)).truncate()).on_hover_text(note);}
                 });
             });
         });
@@ -2348,6 +2399,7 @@ impl eframe::App for SoriApp {
             self.stop_record();
         }
         self.persist();
+        self.handoff(true);
     }
 }
 
@@ -2501,6 +2553,11 @@ mod interaction_tests {
             message_error: false,
             message_at: Instant::now(),
             last_export: None,
+            host: None,
+            host_export_dir: None,
+            host_note: None,
+            takes: vec![],
+            exports: vec![],
             demo: true,
             close_dialog: false,
             allow_close: false,
