@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # a v* tag publishes the portable ZIP as a GitHub release (hosts such as DOTRACK download it from there)
 
 concurrency:
   group: windows-${{ github.ref }}
@@ -40,3 +40,17 @@ jobs:
           name: DOTAPE-Windows-x64
           path: artifacts/DOTAPE-Windows-x64.zip
           if-no-files-found: error
+      - name: Checksums
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash artifacts/DOTAPE-Windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  DOTAPE-Windows-x64.zip" | Out-File -Encoding ascii artifacts/SHA256SUMS.txt
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: |
+            artifacts/DOTAPE-Windows-x64.zip
+            artifacts/SHA256SUMS.txt
+          generate_release_notes: true
