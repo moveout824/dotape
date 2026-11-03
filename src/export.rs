@@ -64,6 +64,7 @@ pub struct ExportSettings {
     pub bitrate: u32,
     pub normalize: bool,
     pub dither: bool,
+    /// Legacy field name retained for saved sessions: true now exports one OTIOZ project.
     #[serde(default)]
     pub split_tracks: bool,
 }
@@ -82,6 +83,20 @@ impl Default for ExportSettings {
     }
 }
 impl ExportSettings {
+    pub fn output_label(&self) -> &'static str {
+        if self.split_tracks {
+            "OTIOZ"
+        } else {
+            self.format.label()
+        }
+    }
+    pub fn output_extension(&self) -> &'static str {
+        if self.split_tracks {
+            "otioz"
+        } else {
+            self.format.extension()
+        }
+    }
     pub fn validate(&self) -> Result<(), String> {
         if ![44100, 48000, 96000].contains(&self.rate)
             || ![1, 2].contains(&self.channels)
@@ -100,7 +115,7 @@ impl ExportSettings {
     }
 }
 
-fn resampled_project(project: &Project, rate: u32) -> Result<Project, String> {
+pub(crate) fn resampled_project(project: &Project, rate: u32) -> Result<Project, String> {
     let mut prepared = project.clone();
     prepared
         .sources
@@ -245,15 +260,18 @@ pub fn export(
     path: &Path,
     progress: Arc<AtomicU32>,
 ) -> Result<ExportResult, String> {
+    if settings.split_tracks {
+        return crate::interchange::export_project(project, settings, path, progress);
+    }
     export_single(project, settings, path, progress, None, None)
 }
 
-fn export_single(
+pub(crate) fn export_single(
     project: &Project,
     settings: &ExportSettings,
     path: &Path,
     progress: Arc<AtomicU32>,
-    duration: Option<f64>,
+    total_frames: Option<usize>,
     shared_scale: Option<f32>,
 ) -> Result<ExportResult, String> {
     settings.validate()?;
@@ -262,7 +280,7 @@ fn export_single(
     }
     let prepared = resampled_project(project, settings.rate)?;
     let total =
-        (duration.unwrap_or_else(|| project.duration()) * settings.rate as f64).ceil() as usize;
+        total_frames.unwrap_or_else(|| (project.duration() * settings.rate as f64).ceil() as usize);
     // RIFF WAV has a 4 GiB data-size limit. Refuse before creating a partial file.
     if settings.format == Format::Wav
         && total as u64 * settings.channels as u64 * (settings.bits as u64 / 8) > 4_294_967_000
@@ -327,100 +345,6 @@ fn export_single(
         path: path.to_path_buf(),
         clipped: peak * scale > 1.0 && !(settings.format == Format::Wav && settings.bits == 32),
     })
-}
-
-pub fn export_tracks(
-    project: &Project,
-    settings: &ExportSettings,
-    parent: &Path,
-    progress: Arc<AtomicU32>,
-) -> Result<ExportResult, String> {
-    settings.validate()?;
-    let tracks: Vec<_> = project
-        .tracks
-        .iter()
-        .enumerate()
-        .filter(|(i, t)| !t.muted && project.clips.iter().any(|c| c.track == *i))
-        .map(|(i, _)| i)
-        .collect();
-    if tracks.is_empty() {
-        return Err("저장할 트랙이 없습니다. 음소거를 확인하세요.".into());
-    }
-    let parent = parent.canonicalize().map_err(|e| e.to_string())?;
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let stage = parent.join(format!(".sori-tracks-{nonce}.tmp"));
-    fs::create_dir(&stage).map_err(|e| e.to_string())?;
-    let task = (|| {
-        let scale = if settings.normalize {
-            let prepared = resampled_project(project, settings.rate)?;
-            let frames = (project.duration() * settings.rate as f64).ceil() as usize;
-            let mut peak = 0.0_f32;
-            for frame in 0..frames {
-                let v = prepared.mix_frame(frame as f64 / settings.rate as f64);
-                let p = if settings.channels == 1 {
-                    ((v[0] + v[1]) * 0.5).abs()
-                } else {
-                    v[0].abs().max(v[1].abs())
-                };
-                peak = peak.max(p);
-            }
-            if peak > 0.0 { 0.8912509 / peak } else { 1.0 }
-        } else {
-            1.0
-        };
-        let mut clipped = false;
-        for (n, index) in tracks.iter().enumerate() {
-            progress.store(1 + (n * 98 / tracks.len()) as u32, Ordering::Relaxed);
-            let mut stem = project.clone();
-            stem.clips.retain(|c| c.track == *index);
-            let track = &project.tracks[*index];
-            let name = if track.name.trim().is_empty() {
-                format!("트랙 {:02}", index + 1)
-            } else {
-                safe_name(&track.name)
-            };
-            let path = stage.join(format!(
-                "{:02} - {}.{}",
-                index + 1,
-                name,
-                settings.format.extension()
-            ));
-            let result = export_single(
-                &stem,
-                settings,
-                &path,
-                Arc::new(AtomicU32::new(0)),
-                Some(project.duration()),
-                Some(scale),
-            )?;
-            clipped |= result.clipped;
-        }
-        let base = format!("트랙 - {}", safe_name(&project.name));
-        let mut target = parent.join(&base);
-        let mut n = 2;
-        while target.exists() {
-            target = parent.join(format!("{base} ({n})"));
-            n += 1;
-        }
-        fs::rename(&stage, &target).map_err(|e| e.to_string())?;
-        progress.store(100, Ordering::Relaxed);
-        Ok(ExportResult {
-            path: target,
-            clipped,
-        })
-    })();
-    if task.is_err() && stage.is_dir() {
-        if stage
-            .canonicalize()
-            .is_ok_and(|p| p.starts_with(&parent) && p != parent)
-        {
-            let _ = fs::remove_dir_all(&stage);
-        }
-    }
-    task
 }
 
 pub fn safe_name(name: &str) -> String {
@@ -639,8 +563,17 @@ pub fn self_test() -> Result<String, String> {
             return Err(format!("PCM 비교 실패: sample {i}"));
         }
     }
+    export(
+        &p,
+        &ExportSettings {
+            split_tracks: true,
+            ..Default::default()
+        },
+        &folder.join("timeline.otioz"),
+        Arc::new(AtomicU32::new(0)),
+    )?;
     Ok(format!(
-        "PASS: 9 exports; float WAV matches the timeline sample-for-sample. {}",
+        "PASS: 9 audio exports + 1 OTIOZ project; float WAV matches the timeline sample-for-sample. {}",
         folder.display()
     ))
 }
@@ -685,40 +618,5 @@ mod tests {
             .validate()
             .is_err()
         );
-    }
-
-    #[test]
-    fn separated_tracks_keep_alignment_and_sum_to_the_same_mix() {
-        let p = demo_project();
-        let settings = ExportSettings {
-            bits: 32,
-            dither: false,
-            split_tracks: true,
-            ..Default::default()
-        };
-        let root = std::env::var_os("SORI_TEST_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| std::env::temp_dir().join("Sori-tests"));
-        fs::create_dir_all(&root).unwrap();
-        let result = export_tracks(&p, &settings, &root, Arc::new(AtomicU32::new(0))).unwrap();
-        let files: Vec<_> = fs::read_dir(&result.path)
-            .unwrap()
-            .map(|p| p.unwrap().path())
-            .collect();
-        assert_eq!(files.len(), 3);
-        let total = (p.duration() * 48000.0).ceil() as usize;
-        let mut sum = vec![0.0_f32; total * 2];
-        for path in files {
-            let mut reader = hound::WavReader::open(path).unwrap();
-            assert_eq!(reader.duration() as usize, total);
-            for (i, v) in reader.samples::<f32>().enumerate() {
-                sum[i] += v.unwrap();
-            }
-        }
-        for (frame, pair) in sum.chunks_exact(2).enumerate() {
-            let expected = p.mix_frame(frame as f64 / 48000.0);
-            assert!((pair[0] - expected[0]).abs() < 1e-6);
-            assert!((pair[1] - expected[1]).abs() < 1e-6);
-        }
     }
 }

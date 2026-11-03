@@ -7,6 +7,8 @@ session*.json
 *.mp3
 *.flac
 *.ogg
+*.otioz
+*.otio
 *.exe
 *.zip
 .env

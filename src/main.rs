@@ -4,6 +4,7 @@ mod app;
 mod audio;
 mod export;
 mod host;
+mod interchange;
 mod model;
 mod session;
 mod theme;
@@ -51,7 +52,10 @@ fn main() -> eframe::Result {
             .with_title("DOTAPE")
             .with_inner_size([1180.0, 820.0])
             .with_min_inner_size([940.0, 680.0])
-            .with_icon(eframe::egui::IconData::default()),
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon/dotape.png"))
+                    .expect("The bundled DOTAPE icon is valid PNG"),
+            ),
         renderer: eframe::Renderer::Glow,
         centered: true,
         ..Default::default()

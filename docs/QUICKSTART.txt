@@ -11,6 +11,11 @@ DOTAPE.exe를 실행하고 마이크를 고른 뒤 가운데 녹음 버튼을 �
 R 녹음 / Space 재생 / Ctrl+B 분할 / Ctrl+J 이어붙이기
 Ctrl+C·V 복사·붙여넣기 / Ctrl+Z 취소 / Ctrl+Shift+Z 다시 실행
 N 자석 / Alt+드래그 자석 해제 / Ctrl+E 내보내기
+Delete·Backspace 선택 클립 삭제
+
+내보내기에서 ‘Resolve 프로젝트’를 고르면 트랙·클립과 오디오를 .otioz 한 파일로 저장합니다.
+Resolve 18.5 이상: 파일 → 가져오기 → 타임라인에서 .otioz를 여세요.
+볼륨과 페이드는 각 클립의 오디오에 반영합니다.
 
 녹음 원본과 마지막 작업: %LOCALAPPDATA%\Sori
 데이터 경로는 이전 버전과 호환됩니다. 앱은 녹음 파일을 인터넷에 보내지 않습니다.

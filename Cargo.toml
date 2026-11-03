@@ -1,6 +1,6 @@
 [package]
 name = "dotape"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "A minimal pixel-art recorder and multitrack audio editor"
 license = "MIT"
@@ -21,6 +21,7 @@ mp3lame-encoder = "0.2.2"
 vorbis_rs = { version = "0.5.5", default-features = false }
 rubato = "0.16.2"
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
+zip = { version = "=2.4.2", default-features = false }
 
 [profile.release]
 opt-level = 3

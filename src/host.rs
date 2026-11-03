@@ -66,6 +66,7 @@ struct Handoff<'a> {
     host: Option<&'a str>,
     last_take: Option<String>,
     last_export: Option<String>,
+    last_project: Option<String>,
     takes: Vec<String>,
     exports: Vec<String>,
     updated: u64,
@@ -73,7 +74,7 @@ struct Handoff<'a> {
 }
 
 /// `dir/handoff.json`을 임시 파일에 쓴 뒤 바꿔치기한다. 디스크에 남아 있는 항목만 적는다.
-/// 내보내기 항목은 파일이거나(합친 파일) 폴더다(트랙별 파일).
+/// 프로젝트는 last_project에 두어 오디오 호스트가 OTIOZ를 녹음 파일로 오해하지 않게 한다.
 pub fn write_handoff(
     dir: &Path,
     host: Option<&str>,
@@ -96,7 +97,16 @@ pub fn write_handoff(
         version: 1,
         host,
         last_take: takes.last().cloned(),
-        last_export: exports.last().cloned(),
+        last_export: exports
+            .iter()
+            .rev()
+            .find(|p| !p.to_lowercase().ends_with(".otioz"))
+            .cloned(),
+        last_project: exports
+            .iter()
+            .rev()
+            .find(|p| p.to_lowercase().ends_with(".otioz"))
+            .cloned(),
         takes,
         exports,
         updated: SystemTime::now()
@@ -122,6 +132,27 @@ pub fn write_handoff(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_export_does_not_replace_the_audio_handoff() {
+        let root = scratch("project");
+        let audio = root.join("mix.wav");
+        let project = root.join("edited.otioz");
+        std::fs::write(&audio, b"RIFF").unwrap();
+        std::fs::write(&project, b"PK").unwrap();
+        let path = write_handoff(
+            &root,
+            Some("DOTRACK"),
+            &[],
+            &[audio.clone(), project.clone()],
+            false,
+        )
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(v["last_export"], audio.to_string_lossy().as_ref());
+        assert_eq!(v["last_project"], project.to_string_lossy().as_ref());
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let root = std::env::var_os("SORI_TEST_DIR")

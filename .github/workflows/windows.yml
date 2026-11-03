@@ -35,22 +35,29 @@ jobs:
           cargo build --release --locked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/package.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git archive --format=zip --prefix=dotape-source/ --output=artifacts/DOTAPE-source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: DOTAPE-Windows-x64
-          path: artifacts/DOTAPE-Windows-x64.zip
+          path: artifacts/*.zip
           if-no-files-found: error
       - name: Checksums
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          $hash = (Get-FileHash artifacts/DOTAPE-Windows-x64.zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  DOTAPE-Windows-x64.zip" | Out-File -Encoding ascii artifacts/SHA256SUMS.txt
+          $hashes = foreach ($name in @('DOTAPE-Windows-x64.zip', 'DOTAPE-source.zip')) {
+            $hash = (Get-FileHash (Join-Path artifacts $name) -Algorithm SHA256).Hash.ToLower()
+            "$hash  $name"
+          }
+          $hashes | Out-File -Encoding ascii artifacts/SHA256SUMS.txt
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             artifacts/DOTAPE-Windows-x64.zip
+            artifacts/DOTAPE-source.zip
             artifacts/SHA256SUMS.txt
           generate_release_notes: true

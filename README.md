@@ -40,7 +40,7 @@ Windows x64 ZIP을 풀고 `DOTAPE.exe`를 실행하세요. 갈무리 글꼴과 �
 | Ctrl+Z / Ctrl+Shift+Z | 실행 취소·다시 실행 |
 | N | 정렬 자석 토글 |
 | Alt+드래그 | 자석을 잠시 해제 |
-| Delete | 선택 클립 삭제 |
+| Delete / Backspace | 선택 클립 삭제 |
 | Home | 처음으로 |
 | Ctrl+E | 내보내기 |
 
@@ -52,9 +52,15 @@ Windows x64 ZIP을 풀고 `DOTAPE.exe`를 실행하세요. 갈무리 글꼴과 �
 
 설명은 마우스를 1.5초 멈추면 나타납니다. 설정은 즉시 적용합니다. 마이크 하나로 목소리를 녹음한다면 모노 입력 1과 기기 자동 설정부터 사용해 보세요.
 
-WAV·MP3·FLAC·OGG Vorbis로 내보냅니다. 하나의 파일로 합치거나 트랙별로 나눌 수 있습니다. 트랙별 파일은 시작점과 전체 길이를 맞춰 저장합니다. 음소거한 트랙은 제외합니다.
+‘오디오 파일’은 WAV·MP3·FLAC·OGG Vorbis 하나로 합쳐 저장합니다.
 
-‘전체 피크 -1 dB’를 켜면 믹스 전체에 같은 배율을 적용하므로 미리듣기와 최종 크기가 달라질 수 있습니다. 트랙별 출력에도 같은 전체 배율을 씁니다. 32 bit float WAV는 믹스에서 0 dB를 넘는 값도 보존합니다.
+![Resolve 프로젝트 내보내기](docs/export.png)
+
+‘Resolve 프로젝트’는 트랙·클립 배치와 오디오를 **`.otioz` 한 파일**에 담습니다. DaVinci Resolve 18.5 이상에서 **파일 → 가져오기 → 타임라인**으로 열면 트랙과 컷이 나뉜 타임라인으로 가져옵니다. 미디어가 파일 안에 들어 있어 원본 녹음 폴더를 따로 복사하지 않아도 됩니다. [Blackmagic의 OTIO 안내](https://documents.blackmagicdesign.com/se/SupportNotes/DaVinci_Resolve_18.5_New_Features_Guide.pdf?_v=1681801210000)
+
+프로젝트의 클립 오디오는 32 bit float WAV로 저장합니다. 클립·트랙·전체 볼륨과 페이드는 오디오에 반영합니다. Resolve에서 각 클립을 옮기거나 자를 수 있지만 DOTAPE의 페이드 손잡이와 볼륨 값이 별도 조절값으로 옮겨지지는 않습니다. 음소거한 트랙도 미디어와 비활성 상태를 함께 담습니다. 편집 시각은 오디오 샘플 단위로 기록하며, 가져온 뒤의 표시·편집 단위는 Resolve 타임라인 설정을 따릅니다.
+
+‘전체 피크 -1 dB’를 켜면 믹스 전체에 같은 배율을 적용하므로 미리듣기와 최종 크기가 달라질 수 있습니다. 프로젝트의 클립에도 같은 배율을 씁니다. 32 bit float WAV는 믹스에서 0 dB를 넘는 값도 보존합니다.
 
 원본 WAV와 마지막 편집은 `%LOCALAPPDATA%\Sori`에 자동 저장합니다. 이전 버전의 작업을 이어 쓰도록 데이터 경로를 유지했습니다. 설정 아이콘을 오른쪽 클릭하면 녹음 폴더를 엽니다. 삭제한 클립의 원본은 디스크에 남습니다.
 
@@ -77,7 +83,7 @@ WAV·MP3·FLAC·OGG Vorbis로 내보냅니다. 하나의 파일로 합치거나 
  "takes":["..."],"exports":["..."],"updated":1762150000,"closed":true}
 ```
 
-목록에는 디스크에 남아 있는 항목만 적습니다. 트랙별로 내보낸 경우 `exports` 항목은 폴더입니다.
+목록에는 디스크에 남아 있는 항목만 적습니다. `last_export`는 마지막 오디오 파일, `last_project`는 마지막 OTIOZ 프로젝트입니다. 녹음용 호스트가 프로젝트 파일을 오디오로 읽지 않도록 나눴습니다. `exports`에는 둘 다 기록합니다.
 
 ## 개발
 
@@ -92,10 +98,10 @@ cargo build --release --locked
 
 실행 파일은 `target/release/DOTAPE.exe`, 배포 ZIP은 `artifacts`에 생성합니다. GitHub Actions에서도 Windows 빌드와 테스트를 실행합니다.
 
-타임라인 위젯에 마우스·키보드 입력을 재현하고, 다중 선택·휠·화면 밖 이동·자동 트랙·덮어쓰기·볼륨·이름·페이드 밀어내기를 검사합니다. 트랙별 WAV를 합쳤을 때 믹스와 일치하는지도 검증합니다.
+타임라인 위젯에 마우스·키보드 입력을 재현하고, 다중 선택·휠·화면 밖 이동·자동 트랙·덮어쓰기·볼륨·이름·페이드 밀어내기를 검사합니다. OTIOZ에 담은 클립들을 배치대로 합쳤을 때 원래 믹스와 일치하는지도 검증합니다.
 
 ```powershell
-# 합성 오디오로 형식별 출력과 PCM 일치 검사
+# 합성 오디오로 형식별 출력·OTIOZ와 PCM 일치 검사
 $env:SORI_TEST_DIR = 'C:\path\to\test-output'
 Start-Process ./target/release/DOTAPE.exe -ArgumentList '--self-test' -Wait
 

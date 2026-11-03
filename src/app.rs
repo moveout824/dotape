@@ -142,6 +142,9 @@ impl SoriApp {
         let mut project = Project::default();
         let mut record_settings = RecordSettings::default();
         let mut export_settings = ExportSettings::default();
+        if capture_path.is_some() && args.iter().any(|a| a == "--capture-export") {
+            export_settings.split_tracks = true;
+        }
         let mut message = String::new();
         let mut message_error = false;
         if demo {
@@ -214,7 +217,7 @@ impl SoriApp {
             level: 0.0,
             pending_edit: None,
             settings_open: args.iter().any(|a| a == "--capture-settings"),
-            export_open: false,
+            export_open: args.iter().any(|a| a == "--capture-export"),
             export_job: None,
             message,
             message_error,
@@ -754,7 +757,8 @@ impl SoriApp {
                     paste,
                     i.consume_key(Modifiers::NONE, Key::Space),
                     i.consume_key(Modifiers::NONE, Key::R),
-                    i.consume_key(Modifiers::NONE, Key::Delete),
+                    i.consume_key(Modifiers::NONE, Key::Delete)
+                        | i.consume_key(Modifiers::NONE, Key::Backspace),
                     i.consume_key(Modifiers::NONE, Key::Home),
                     i.consume_key(Modifiers::NONE, Key::Escape),
                     i.consume_key(Modifiers::CTRL, Key::E),
@@ -913,47 +917,35 @@ impl SoriApp {
             if let Some(dir) = &start_dir {
                 dialog = dialog.set_directory(dir);
             }
-            let result = if settings.split_tracks {
-                match dialog.set_title("트랙 파일을 저장할 폴더").pick_folder() {
-                    Some(folder) => {
-                        export::export_tracks(&project, &settings, &folder, worker_progress)
-                            .map(Some)
+            let extension = settings.output_extension();
+            let file_name = format!("{}.{}", export::safe_name(&project.name), extension);
+            let result = match dialog
+                .set_title(if settings.split_tracks {
+                    "Resolve 프로젝트 저장"
+                } else {
+                    "오디오 저장"
+                })
+                .set_file_name(file_name)
+                .add_filter(settings.output_label(), &[extension])
+                .save_file()
+            {
+                Some(path) => {
+                    let path = if path.extension().is_none() {
+                        path.with_extension(extension)
+                    } else {
+                        path
+                    };
+                    if path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .is_some_and(|s| s.eq_ignore_ascii_case(extension))
+                    {
+                        export::export(&project, &settings, &path, worker_progress).map(Some)
+                    } else {
+                        Err(format!("파일 확장자를 .{}로 지정해 주세요.", extension))
                     }
-                    None => Ok(None),
                 }
-            } else {
-                let file_name = format!(
-                    "{}.{}",
-                    export::safe_name(&project.name),
-                    settings.format.extension()
-                );
-                match dialog
-                    .set_title("오디오 저장")
-                    .set_file_name(file_name)
-                    .add_filter(settings.format.label(), &[settings.format.extension()])
-                    .save_file()
-                {
-                    Some(path) => {
-                        let path = if path.extension().is_none() {
-                            path.with_extension(settings.format.extension())
-                        } else {
-                            path
-                        };
-                        if path
-                            .extension()
-                            .and_then(|s| s.to_str())
-                            .is_some_and(|s| s.eq_ignore_ascii_case(settings.format.extension()))
-                        {
-                            export::export(&project, &settings, &path, worker_progress).map(Some)
-                        } else {
-                            Err(format!(
-                                "파일 확장자를 .{}로 지정해 주세요.",
-                                settings.format.extension()
-                            ))
-                        }
-                    }
-                    None => Ok(None),
-                }
+                None => Ok(None),
             };
             let _ = tx.send(result);
         });
@@ -2247,7 +2239,7 @@ impl SoriApp {
                 ui.with_layout(Layout::right_to_left(Align::Center),|ui|{
                     if let Some(job)=&self.export_job{let n=job.progress.load(Ordering::Relaxed);ui.add_sized(vec2(170.0,28.0),ProgressBar::new(n as f32/100.0).text(if n==0{"저장 위치".into()}else{format!("{n}%")}));}
                     else{ui.add_enabled_ui(!self.busy()&&!self.project.clips.is_empty(),|ui|{
-                        let response=theme::primary(ui,&format!("{} 내보내기",self.export_settings.format.label()),vec2(142.0,34.0)).on_hover_text("내보내기 · Ctrl+E\n오른쪽 클릭하면 마지막 저장 위치를 열 수 있습니다.");
+                        let response=theme::primary(ui,&format!("{} 내보내기",self.export_settings.output_label()),vec2(142.0,34.0)).on_hover_text("내보내기 · Ctrl+E\n오른쪽 클릭하면 마지막 저장 위치를 열 수 있습니다.");
                         #[cfg(test)]{self.test_rects.push(("download".into(),response.rect));}
                         if response.clicked(){self.export_open=true;}
                         response.context_menu(|ui|{if let Some(path)=&self.last_export{if ui.button("저장 위치 열기").clicked(){reveal(path);ui.close();}}else{ui.add_enabled(false,Button::new("아직 저장한 파일 없음"));}});
@@ -2304,21 +2296,70 @@ impl SoriApp {
         let mut changed = false;
         let mut start = false;
         Window::new("내보내기").open(&mut open).collapsible(false).resizable(false).default_width(424.0)
-            .frame(egui::Frame::new().fill(SURFACE).stroke(Stroke::new(1.0_f32,BORDER)).inner_margin(16)).show(ctx,|ui|{
-            ui.horizontal(|ui|{changed|=ui.selectable_value(&mut self.export_settings.split_tracks,false,"합친 파일").changed();changed|=ui.selectable_value(&mut self.export_settings.split_tracks,true,"트랙별 파일").on_hover_text("각 파일의 시작과 길이를 같게 저장합니다. 음소거한 트랙은 제외합니다.").changed();});ui.add_space(12.0);
-            Grid::new("export-settings").num_columns(2).spacing([18.0,14.0]).show(ui,|ui|{
-                ui.label(RichText::new("형식").color(MUTED));let r=ComboBox::from_id_salt("format").selected_text(self.export_settings.format.label()).width(280.0).show_ui(ui,|ui|{for n in Format::ALL{changed|=ui.selectable_value(&mut self.export_settings.format,n,n.label()).on_hover_text(n.help()).changed();}}).response;changed|=theme::reset_combo(&mut self.export_settings.format,Format::Wav,r).on_hover_text(self.export_settings.format.help()).changed();ui.end_row();
-                ui.label(RichText::new("샘플레이트").color(MUTED));let r=ComboBox::from_id_salt("export-rate").selected_text(rate_label(self.export_settings.rate)).width(280.0).show_ui(ui,|ui|{for n in [44100,48000,96000]{ui.add_enabled_ui(n<=48000||self.export_settings.format!=Format::Mp3,|ui|{changed|=ui.selectable_value(&mut self.export_settings.rate,n,rate_label(n)).changed();});}}).response;changed|=theme::reset_combo(&mut self.export_settings.rate,48000,r).on_hover_text("48 kHz: 영상용. 44.1 kHz: 일반 오디오용. MP3는 최대 48 kHz. 더블클릭하면 48 kHz.").changed();ui.end_row();
-                ui.label(RichText::new("채널").color(MUTED));let r=ComboBox::from_id_salt("export-channels").selected_text(if self.export_settings.channels==1{"모노"}else{"스테레오"}).width(280.0).show_ui(ui,|ui|{changed|=ui.selectable_value(&mut self.export_settings.channels,1,"모노").changed();changed|=ui.selectable_value(&mut self.export_settings.channels,2,"스테레오").changed();}).response;changed|=theme::reset_combo(&mut self.export_settings.channels,2,r).on_hover_text("목소리 하나라면 모노로 충분합니다. 스테레오는 좌우를 보존합니다. 더블클릭하면 스테레오.").changed();ui.end_row();
-                if matches!(self.export_settings.format,Format::Wav|Format::Flac){ui.label(RichText::new("비트 깊이").color(MUTED));let r=ComboBox::from_id_salt("bits").selected_text(bits_label(self.export_settings.bits)).width(280.0).show_ui(ui,|ui|{for n in [16,24,32]{ui.add_enabled_ui(n!=32||self.export_settings.format==Format::Wav,|ui|{changed|=ui.selectable_value(&mut self.export_settings.bits,n,bits_label(n)).changed();});}}).response;changed|=theme::reset_combo(&mut self.export_settings.bits,24,r).on_hover_text("24 bit: 편집용 권장. 16 bit: 작은 용량. 32 bit float: 과한 믹스 피크도 보존. 더블클릭하면 24 bit.").changed();ui.end_row();}
-                else{ui.label(RichText::new("비트레이트").color(MUTED));let r=ComboBox::from_id_salt("bitrate").selected_text(format!("{} kbps",self.export_settings.bitrate)).width(280.0).show_ui(ui,|ui|{for n in [128,192,256,320]{changed|=ui.selectable_value(&mut self.export_settings.bitrate,n,format!("{n} kbps")).changed();}}).response;changed|=theme::reset_combo(&mut self.export_settings.bitrate,192,r).on_hover_text("높을수록 파일은 크고 손실은 적습니다. 목소리는 128~192 kbps, 음악은 256~320 kbps가 무난합니다. 더블클릭하면 192.").changed();ui.end_row();}
+            .frame(egui::Frame::new().fill(SURFACE).stroke(Stroke::new(1.0_f32, BORDER)).inner_margin(16))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    changed |= ui.selectable_value(&mut self.export_settings.split_tracks, false, "오디오 파일").changed();
+                    changed |= ui.selectable_value(&mut self.export_settings.split_tracks, true, "Resolve 프로젝트")
+                        .on_hover_text("트랙·클립 배치와 오디오를 .otioz 한 파일에 담습니다.\nResolve의 파일 → 가져오기 → 타임라인에서 엽니다.\n볼륨과 페이드는 클립 오디오에 반영해 소리를 유지합니다.").changed();
+                });
+                ui.add_space(12.0);
+                let project_mode = self.export_settings.split_tracks;
+                Grid::new("export-settings").num_columns(2).spacing([18.0,14.0]).show(ui,|ui| {
+                    if !project_mode {
+                        ui.label(RichText::new("형식").color(MUTED));
+                        let r=ComboBox::from_id_salt("format").selected_text(self.export_settings.format.label()).width(280.0).show_ui(ui,|ui| {
+                            for n in Format::ALL { changed |= ui.selectable_value(&mut self.export_settings.format,n,n.label()).on_hover_text(n.help()).changed(); }
+                        }).response;
+                        changed |= theme::reset_combo(&mut self.export_settings.format,Format::Wav,r).on_hover_text(self.export_settings.format.help()).changed();
+                        ui.end_row();
+                    }
+                    ui.label(RichText::new("샘플레이트").color(MUTED));
+                    let r=ComboBox::from_id_salt("export-rate").selected_text(rate_label(self.export_settings.rate)).width(280.0).show_ui(ui,|ui| {
+                        for n in [44100,48000,96000] { ui.add_enabled_ui(project_mode || n<=48000 || self.export_settings.format!=Format::Mp3,|ui| { changed |= ui.selectable_value(&mut self.export_settings.rate,n,rate_label(n)).changed(); }); }
+                    }).response;
+                    changed |= theme::reset_combo(&mut self.export_settings.rate,48000,r).on_hover_text("48 kHz: 영상용. 44.1 kHz: 일반 오디오용. MP3는 최대 48 kHz. 더블클릭하면 48 kHz.").changed();
+                    ui.end_row();
+                    ui.label(RichText::new("채널").color(MUTED));
+                    let r=ComboBox::from_id_salt("export-channels").selected_text(if self.export_settings.channels==1 {"모노"} else {"스테레오"}).width(280.0).show_ui(ui,|ui| {
+                        changed |= ui.selectable_value(&mut self.export_settings.channels,1,"모노").changed();
+                        changed |= ui.selectable_value(&mut self.export_settings.channels,2,"스테레오").changed();
+                    }).response;
+                    changed |= theme::reset_combo(&mut self.export_settings.channels,2,r).on_hover_text("목소리 하나라면 모노로 충분합니다. 스테레오는 좌우를 보존합니다. 더블클릭하면 스테레오.").changed();
+                    ui.end_row();
+                    if !project_mode {
+                        if matches!(self.export_settings.format,Format::Wav|Format::Flac) {
+                            ui.label(RichText::new("비트 깊이").color(MUTED));
+                            let r=ComboBox::from_id_salt("bits").selected_text(bits_label(self.export_settings.bits)).width(280.0).show_ui(ui,|ui| {
+                                for n in [16,24,32] { ui.add_enabled_ui(n!=32 || self.export_settings.format==Format::Wav,|ui| { changed |= ui.selectable_value(&mut self.export_settings.bits,n,bits_label(n)).changed(); }); }
+                            }).response;
+                            changed |= theme::reset_combo(&mut self.export_settings.bits,24,r).on_hover_text("24 bit: 편집용 권장. 16 bit: 작은 용량. 32 bit float: 과한 믹스 피크도 보존. 더블클릭하면 24 bit.").changed();
+                        } else {
+                            ui.label(RichText::new("비트레이트").color(MUTED));
+                            let r=ComboBox::from_id_salt("bitrate").selected_text(format!("{} kbps",self.export_settings.bitrate)).width(280.0).show_ui(ui,|ui| {
+                                for n in [128,192,256,320] { changed |= ui.selectable_value(&mut self.export_settings.bitrate,n,format!("{n} kbps")).changed(); }
+                            }).response;
+                            changed |= theme::reset_combo(&mut self.export_settings.bitrate,192,r).on_hover_text("높을수록 파일은 크고 손실은 적습니다. 목소리는 128~192 kbps, 음악은 256~320 kbps가 무난합니다. 더블클릭하면 192.").changed();
+                        }
+                        ui.end_row();
+                    }
+                });
+                if !project_mode {
+                    if self.export_settings.format==Format::Mp3 && self.export_settings.rate>48000 { self.export_settings.rate=48000; changed=true; }
+                    if self.export_settings.format==Format::Flac && self.export_settings.bits==32 { self.export_settings.bits=24; changed=true; }
+                }
+                ui.add_space(12.0);
+                changed |= ui.checkbox(&mut self.export_settings.normalize,"전체 피크 -1 dB").on_hover_text("현재 믹스를 같은 배율로 키우거나 줄입니다. 미리듣기와 최종 크기가 달라질 수 있습니다. 프로젝트의 각 클립에도 같은 배율을 적용합니다.").changed();
+                if !project_mode && matches!(self.export_settings.format,Format::Wav|Format::Flac) && self.export_settings.bits<32 {
+                    changed |= ui.checkbox(&mut self.export_settings.dither,"디더").on_hover_text("정수 비트 깊이로 바꿀 때 작은 변환 왜곡을 완화합니다. 일반적으로 켜두면 됩니다.").changed();
+                }
+                ui.add_space(12.0);
+                let label=if self.export_settings.format==Format::Wav && !project_mode {
+                    let mb=self.project.duration()*self.export_settings.rate as f64*self.export_settings.channels as f64*self.export_settings.bits as f64/8.0/1_000_000.0;
+                    format!("저장 위치 선택 / {mb:.1} MB")
+                } else { "저장 위치 선택".into() };
+                if theme::primary(ui,&label,vec2(ui.available_width(),34.0)).clicked() {start=true;}
             });
-            if self.export_settings.format==Format::Mp3&&self.export_settings.rate>48000{self.export_settings.rate=48000;changed=true;}
-            if self.export_settings.format==Format::Flac&&self.export_settings.bits==32{self.export_settings.bits=24;changed=true;}
-            ui.add_space(12.0);changed|=ui.checkbox(&mut self.export_settings.normalize,"전체 피크 -1 dB").on_hover_text("현재 믹스를 같은 배율로 키우거나 줄입니다. 미리듣기와 최종 크기가 달라질 수 있습니다. 트랙별 파일에도 같은 전체 배율을 적용합니다.").changed();
-            if matches!(self.export_settings.format,Format::Wav|Format::Flac)&&self.export_settings.bits<32{changed|=ui.checkbox(&mut self.export_settings.dither,"디더").on_hover_text("정수 비트 깊이로 바꿀 때 작은 변환 왜곡을 완화합니다. 일반적으로 켜두면 됩니다.").changed();}
-            ui.add_space(12.0);let label=if self.export_settings.format==Format::Wav&&!self.export_settings.split_tracks{let mb=self.project.duration()*self.export_settings.rate as f64*self.export_settings.channels as f64*self.export_settings.bits as f64/8.0/1_000_000.0;format!("저장 위치 선택 / {mb:.1} MB")}else{"저장 위치 선택".into()};if theme::primary(ui,&label,vec2(ui.available_width(),34.0)).clicked(){start=true;}
-        });
         self.export_open &= open;
         if changed {
             self.persist();
@@ -2956,6 +2997,24 @@ mod interaction_tests {
         assert_eq!(h.app.project.clips.len(), 4);
         h.key(Key::Z, Modifiers::CTRL | Modifiers::SHIFT);
         assert_eq!(h.app.project.clips.len(), 5);
+    }
+    #[test]
+    fn backspace_deletes_selection_undo_restores_it_and_renaming_is_protected() {
+        let mut h = Harness::new();
+        h.app.selection = [10, 11].into_iter().collect();
+        h.app.selected = Some(10);
+        h.key(Key::Backspace, Modifiers::NONE);
+        assert_eq!(h.app.project.clips.len(), 1);
+        assert_eq!(h.app.project.clips[0].id, 12);
+        h.key(Key::Z, Modifiers::CTRL);
+        assert_eq!(h.app.project.clips.len(), 3);
+        assert_eq!(h.app.project.tracks.len(), 2);
+        h.app.rename_target = Some(RenameTarget::Clip(10));
+        h.app.rename_text = "voice".into();
+        h.app.rename_focus = true;
+        h.key(Key::Backspace, Modifiers::NONE);
+        assert_eq!(h.app.project.clips.len(), 3);
+        assert!(h.app.rename_target.is_some());
     }
     #[test]
     fn controls_stay_separate_at_minimum_size_with_five_tracks_and_error() {
